@@ -1,0 +1,253 @@
+---
+title: "BIO247 - Day 1: Track allele frequency trajectories during experimental evolution
+  study in Drosophila"
+author: "Marianthi Karageorgi"
+date: "08-06-2024 "
+output: pdf_document
+---
+
+# 1. Learning goals
+
+In this session, you will use allele frequency time series data from an experimental evolution study to carry out summary statistics and visualize allele frequency trajectories over time with different treatments.
+
+# 2. Background
+
+The data you will be analyzing are from an experimental evolution experiment with fruit flies in field mesocosms (Karageorgi et al., unpublished). Normally you would have to first perform the bioinformatic analysis to get the allele frequency data. To save time, you will be working with the allele frequency data directly.
+
+**Experiment summary**
+
+20 replicate Drosophila populations were established all originating from a common baseline population. These populations were allowed to evolve from early summer to late fall in 2021 (\~10-12 generations). From mid-summer to early fall (July 26 - Sept 6, 2021), 10 of these populations were treated with the insecticide malathion. Using whole-genome pooled sequencing, we quantified allele frequencies at all biallelic SNPs throughout the course of the experiment both for the malathion-treated and malathion-untreated populations.
+
+# 3. Motivating Questions
+
+The target locus of malathion is Acetylcholinesterase (Ace gene) and the populations have standing genetic variation for four resistance mutations in the Ace gene.
+
+1.  How did the malathion selection influence the Ace allele frequency trajectories in the malathion-treated populations and malathion-untreated populations?
+
+2.  How did the Ace allele frequency trajectories change after the malathion treatment?
+
+    (hands-on activity #1)
+
+3.  The populations also contain standing genetic variation for the insecticide dieldrin. How did the frequency of the resistant allele changed in the absence of selection?
+
+    (hands-on activity #2)
+
+# 4. Data
+
+The data can be downloaded here. The RData file contains three data frames
+
+-   **afmat**: a numeric matrix of allele frequencies (columns correspond to samples, rows to snps) (Allele Freq MATrix)
+-   **samps**: a dataframe with sample information, ordered by column of afmat, such that each row of samps provides sample information for the corresponding column of afmat.
+-   **sites**: a two-column data frame of chromosome and positions corresponding to the rows of afmat.
+
+```{r}
+library(tidyverse) # R packages for data manipulation, visualization, and analysis
+```
+
+```{r}
+# get data from same folder where you have saved the .Rmd file
+load("./Bio247_EvolvingData.RData", verbose = TRUE) 
+
+# view first 10 row of each data frame
+head(samps)
+head(sites)
+head(afmat)
+```
+
+# 5. Data for Ace
+
+The coordinates for the Ace resistance mutations are chr3R: 9069721 (I161V), chr3R:9069408 (G265A), chr3R: 9069054 (F330Y), chr3R:9063921 (G368A)
+
+## 5.1 Data wrangling
+
+We will subset the data to keep only the positions of interest
+
+```{r}
+# subset afmat for positions of interest
+Ace_afmat = cbind(sites, afmat) %>%
+  
+  # filter the 3R chromosome and positions of interest
+  filter(chrom == "3R" & pos %in% c(9069721, 9069408, 9069054, 9063921))
+    
+
+# transform dataframes in a format to do stats        
+Ace_data = cbind(samps, t(Ace_afmat)[-1:-2,]) %>%
+  
+  #remove columns biol.rep & tech.rep
+  select(-biol.rep, -tech.rep) %>%
+  
+  # turn the tpt column into numeric and re-name tpt to have continuous numbers
+   mutate(tpt = case_when( 
+    tpt == "1" ~ 1, 
+    tpt == "3" ~ 2, 
+    tpt == "10" ~ 3, 
+    tpt == "12" ~ 4,  TRUE ~ as.numeric(tpt))) %>%
+  
+  # add a date column
+  dplyr::mutate(Date = case_when(
+      tpt == 1 ~ as.Date("2021-07-13"),
+      tpt == 2 ~ as.Date("2021-07-26"),
+      tpt == 3 ~ as.Date("2021-09-21"),
+      tpt == 4 ~ as.Date("2021-12-22"))) %>%
+  
+  relocate(Date, .after = tpt) %>%
+
+  #rename columns for resistance alleles
+  dplyr::rename(G368A = `1`, F330Y = `2`, G265A = `3`, I161V = `4`) %>%
+  
+  mutate(treatment = factor(treatment, levels = c("P", "E"))) %>%
+  
+  #turn character to numeric
+  dplyr::mutate(across(7:last_col(), as.numeric)) 
+
+rownames(Ace_data) = NULL
+```
+
+## 5.2 Summary Statistics
+
+```{r}
+library(Rmisc)
+# summarySE() is a custom function that computes the mean, standard deviation, count, standard error, confidence interval for a variable (“measurevar”) within defined grouping variables (“groupvars”)
+
+Ace_data_I161V = summarySE(data= Ace_data, 
+                                 measurevar = "I161V", 
+                                 groupvars = c("tpt","Date", "treatment")) 
+
+Ace_data_G265A = summarySE(data= Ace_data, 
+                                 measurevar = "G265A", 
+                                 groupvars = c("tpt","Date","treatment")) 
+
+Ace_data_F330Y = summarySE(data= Ace_data, 
+                                 measurevar = "F330Y", 
+                                 groupvars = c("tpt","Date","treatment")) 
+
+Ace_data_G368A = summarySE(data= Ace_data, 
+                                 measurevar = "G368A", 
+                                 groupvars = c("tpt","Date","treatment")) 
+```
+
+## 5.3 Plot Ace allele data
+
+Below we will plot the time series data for allele I161V in the malathion-treated and malathion-untreated cages
+
+Let's first subset the data
+
+```{r}
+library(ggpubr) 
+library(ggthemes)
+```
+
+```{r}
+# defining the maximum and minimum values for the left axis
+max_left_y = 1
+min_left_y = 0
+
+
+treatment_labels = c("Treated", "Untreated")
+treatment_values = c("#FB9902", "#347C98")
+
+
+  Ace_data_I161V.plot = ggplot() +
+    
+  # Annotate to indicate when malathion was applied
+  annotate("rect", xmin=as.Date("2021-07-21"), xmax=as.Date("2021-08-25"), ymin=-Inf, ymax=Inf, alpha=0.4, fill="#f2f2f2") +
+  annotate("rect", xmin=as.Date("2021-08-25"), xmax=as.Date("2021-09-06"), ymin=-Inf, ymax=Inf, alpha=0.4, fill="#e5e5e5") +
+    
+  # this code annotates the resistance plot with the generations
+   annotate("rect", 
+           xmin = c(as.Date("2021-06-21"), as.Date("2021-07-01"), as.Date("2021-08-01"), as.Date("2021-09-01"), as.Date("2021-10-01"), as.Date("2021-11-01"), as.Date("2021-12-01")), 
+           xmax = c(as.Date("2021-07-01"), as.Date("2021-08-01"), as.Date("2021-09-01"), as.Date("2021-10-01"), as.Date("2021-11-01"), as.Date("2021-12-01"), as.Date("2021-12-22")), 
+           ymin = -0.15, 
+           ymax = -0.05, 
+           color = "black", 
+           alpha = 0)+
+  
+#this adds the labels in the center of the rectangles
+  annotate("text", x = c(as.Date("2021-06-26"), as.Date("2021-07-17"), as.Date("2021-08-17"), as.Date("2021-09-17"), as.Date("2021-10-17"), as.Date("2021-11-17"), as.Date("2021-12-10")), 
+           y = -0.1, 
+           label = c("1", "2-5", "5-8", "8-10", "11-12", "12", "(o)"), size = 5)+
+  
+#this adds the title above the timeline that says "Generations"
+  annotate("text", x = as.Date("2021-09-17"), y = 0.0, label = "Generations", size = 5)  +
+
+    
+  #line plot for I161V allele frequencies of individual cages across time points grouped by treatment 
+  geom_line(data = Ace_data %>% 
+              filter(Date %in% as.Date(c("2021-07-13", "2021-07-26", "2021-09-21"))), 
+          
+         aes(x = Date , y = I161V, group = cage, color = treatment),
+          linewidth = 0.5, alpha = 0.6) +
+    
+  #this plots for mean allele frequency across time points for each treatment
+  geom_line(data=Ace_data_I161V %>%
+              filter(Date %in% as.Date(c("2021-07-13", "2021-07-26", "2021-09-21"))),
+            
+            aes(x = Date, y = I161V, color= treatment),
+            linewidth= 1.5, alpha =1) +
+
+  #this plots forstandard error of cages across time points
+  geom_errorbar(data= Ace_data_I161V %>%
+                  filter(Date %in% as.Date(c("2021-07-13", "2021-07-26", "2021-09-21"))),
+                aes(x= Date, ymin=I161V-se, ymax=I161V + se, color= treatment),
+                width = 0.1) +
+    
+  # add labels
+  scale_color_manual(name = "Malathion",
+                     labels = treatment_labels,
+                     values = treatment_values) +
+    
+  
+  scale_y_continuous( name = "Minor allele frequency I161V",
+                      breaks=seq(min_left_y, max_left_y, 0.2), 
+                      limits = c(-0.15, 1))+
+  
+  scale_x_date() +
+    
+  xlab("") + # removes the x axis title
+  
+  
+  theme_classic() +
+  
+  theme(
+    # Increase the size of the axis titles
+    axis.title.y = element_text(size = 15),
+    
+    # Increase the size of the axis tick labels
+    axis.text.x = element_text(size = 15),
+    axis.text.y = element_text(size = 15),
+    
+    # Position the legend inside the plot in the upper left hand corner
+    legend.position = c(0.99, 0.99),
+        legend.background = element_rect(fill = "transparent"),
+        legend.justification = c("right", "top"),
+        legend.box.just = "right",
+        legend.margin = margin(3, 3, 3, 3),
+        legend.text = element_text(size = 10)
+)
+
+Ace_data_I161V.plot
+
+ggsave("Ace_data_I161V.plot.pdf", plot = Ace_data_I161V.plot, width = 6, height = 5)
+```
+
+# 6. Hands-on exercises
+
+## 6.1 Exercise 1
+
+There are fitness costs associated with the Ace resistance mutations in the absence of selection. How did the Ace allele frequency trajectories change after the malathion treatment?
+
+-   You can modify the code for plotting above so as to visualize the result for the last timepoint
+
+## 6.2 Exercise 2
+
+The populations contain standing genetic variation for resistance to the organochloride insecticide dieldrin (first described here <https://pubmed.ncbi.nlm.nih.gov/8095336/>). The coordinates for the Rdl resistance mutation is Chr3L:9,148,264.
+
+-   By modifying the code for data wrangling and plotting, you can visualize the trajectory of the Rld resistant allele in all populations.
+
+# 7. Summary
+
+You should now know how to use the allele frequency data contained in the data frame to:
+
+-   carry out summary statistics
+
+-   visualize allele frequency trajectories over time

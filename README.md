@@ -5,8 +5,8 @@ This repository contains slides for the course introduction and teaching materia
 Syllabus - Week 2 Outline
 
 **August 5th 2024**
-Motivation and details of the experimental evolution study in Drosophila 
--Install R and necessary packages
+- Motivation and details of the experimental evolution study in Drosophila 
+- Install R and necessary packages
 
 **August 6th 2024 (Teaching module 1)**
  - Design and genomic data of a study combining experimental evolution with next-generation sequencing 

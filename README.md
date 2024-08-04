@@ -7,7 +7,8 @@ This repository contains slides for the course introduction and teaching materia
 
 | Date                      | Activity                                                                                          |
 |---------------------------|---------------------------------------------------------------------------------------------------|
-| **August 5th 2024**       | Motivation and details of the experimental evolution study in Drosophila                        |
+| **July 29th 2024**       | Introduction on experimental evolution                     |
+| **August 5th 2024**       | Motivation and details of experimental evolution study in Drosophila                        |
 |                           | R installation (https://cran.r-project.org/) and tutorial                                                              |
 | **August 6th 2024**       | Design and genomic data of a study combining experimental evolution with next-generation sequencing |
 | **August 7th 2024**       | Statistical approaches to measure genetic differences between populations in an experimental evolution study |

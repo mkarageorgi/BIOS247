@@ -1,4 +1,4 @@
-# BIOS247:Experimental evolution and whole genome sequencing: from yeast to fruit flies
+# BIOS247 - Experimental evolution and whole genome sequencing: from yeast to fruit flies
 
 This repository contains slides for the course introduction and teaching material for second week of the Stanford mini-course BIOS247 taught in July/August 2024 by Clare Abreu, Marianna Karageorgi, and Jess Rhodes.
 

@@ -14,6 +14,6 @@ Syllabus - Week 2 Outline
 **August 7th 2024 (Teaching module 2)**
 - Statistical approaches to measure genetic differences between populations in an experimental evolution study
 
-**August 8th &9th 2024 (Teaching module 3)**
+**August 8th & 9th 2024 (Teaching module 3)**
 - Statistical approaches to detect genomic regions under selection in an experimental evolution study
 

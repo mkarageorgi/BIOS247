@@ -2,8 +2,6 @@
 
 This repository contains slides for the course introduction and teaching material for second week of the Stanford mini-course BIOS247 taught in July/August 2024 by Clare Abreu, Marianna Karageorgi, and Jess Rhodes.
 
-**Syllabus - Week 2 Outline**
-
 
 | Date                      | Activity                                                                                          |
 |---------------------------|---------------------------------------------------------------------------------------------------|

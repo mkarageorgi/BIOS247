@@ -1,0 +1,400 @@
+---
+title: "BIO247 - Day 2: Calculate genomic divergence of populations over time during experimental 
+  evolution experiment in Drosophila"
+author: "Marianthi Karageorgi"
+date: "08-06-2024"
+output: pdf_document
+---
+
+# 1. Learning goals
+
+In this session, you will use allele frequency data from an experimental evolution study to calculate genomic divergence (Fst) in a specific genomic region between the baseline population and evolving populations over time.
+
+# 2. Background
+
+The allele frequency data you will be analyzing are from an experimental evolution experiment with fruit flies in field mesocosms (Karageorgi et al., unpublished).
+
+**Experiment summary**
+
+20 replicate Drosophila populations were established all originating from a common baseline population. These populations were allowed to evolve from early summer to late fall in 2021 (\~10-12 generations). From mid-summer to early fall (July 26 - Sept 6, 2021), 10 of these populations were treated with the insecticide malathion. Using whole-genome pooled sequencing, we quantified allele frequencies at all biallelic SNPs throughout the course of the experiment for the baseline populations, the malathion-treated populations and the malathion-untreated populations.
+
+# 3. Motivating Questions
+
+The populations have standing genetic variation for four resistance mutations in the Ace locus (target of malathion insecticide).
+
+1.  Did the malathion treatment affect genomic divergence in the Ace region?
+
+2.  Did the malathion treatment affect genomic divergence in the Rdl region (Rld is the target of chlorinated insecticies)?
+
+    (hands-on activity #1)
+
+# 4. Data
+
+The data are in the google drive. There are separate RData files for the baseline populations (4 total samples) and the evolving populations (77 total samples). Each RData file contains three data frames
+
+-   **afmat**: a numeric matrix of allele frequencies (columns correspond to samples, rows to snps) (Allele Freq MATrix)
+-   **samps**: a dataframe with sample information, ordered by column of afmat, such that each row of samps provides sample information for the corresponding column of afmat.
+-   **sites**: a two-column data frame of chromosome and positions corresponding to the rows of afmat.
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+# data for baseline populations
+load("./Bio247_BaselineData.RData", verbose = TRUE)
+
+# data for evolving populations
+load("./Bio247_EvolvingData.RData", verbose = TRUE)
+```
+
+# 5. Data for Ace region
+
+We will fist subset the data for the biallelic SNPs in the extended Ace region (3R:9,048,673..9,085,239) both in the baseline and the evolving populations.
+
+## 5.1 Subset baseline data for Ace region
+
+```{r}
+# we first bind sites and afmat to filter sites of interest in the Ace region from the data
+Ace.base = cbind(sites.base,afmat.base) %>%
+    
+    #filter Ace region (3R:9,048,673..9,085,239)
+    filter(chrom == "3R" & pos %in% c(9048673:9085239)) 
+
+# we select first two columns of the df for the sites
+sites.Ace.base = Ace.base[,1:2]
+
+# we select the rest of the columns of the columns for allele frequencies
+afmat.Ace.base =Ace.base[,3:length(Ace.base)]
+
+# we don't have to subset the samples
+samps.Ace.base = samps.base
+```
+
+## 5.2 Subset evolving data for Ace region
+
+```{r}
+# we first bind sites and afmat to filter sites of interest in the Ace region from the data
+Ace.evolving = cbind(sites,afmat) %>%
+    
+    #filter Ace region (3R:9,048,673..9,085,239)
+    filter(chrom == "3R" & pos %in% c(9048673:9085239)) 
+
+# we select first two columns of the df for the sites
+sites.Ace.evolving = Ace.evolving[,1:2]
+
+# we select the rest of the columns of the columns for allele frequencies
+afmat.Ace.evolving =Ace.evolving[,3:length(Ace.evolving)]
+
+# we don't have to subset the samples
+samps.Ace.evolving = samps
+```
+
+## 5.3 Fst between baseline & evolving populations
+
+Functions to calculate Fst in a data matrix were written by Sharon Greenblum.
+
+```{r}
+Fst=function(p1, p2) {
+  fhat <- p1/2 + p2/2  # avg freq across both pops ie (p1+p2)/2
+  Htot <- 2*fhat*(1-fhat) #heterozygosity of the avg freq ie 2pq 
+  Hwith <- p1*(1-p1) + p2*(1-p2) #avg heterozygosity of indivdual pop freqs  ie. (2pq + 2pq)/2
+  fst=(Htot-Hwith)/Htot # how different are they? scaled by total
+  fst[fhat==0 | fhat==1]=0 # set fst for fixed sites to zero
+  return(fst)
+}
+
+
+Fst.mat = function (x) 
+{
+    if (is.data.frame(x)) 
+        x <- as.matrix(x)                   #if x is data.frame, it turns it into matrix
+    if (!(is.numeric(x) || is.logical(x)))  #if dataframe is not numeric or is logical - the script stops
+        stop("'x' must be numeric")
+    ncy <- ncx <- ncol(x)                   # create variables with the same length as the number of columns of the dataframe
+    r <- matrix(0, nrow = ncx, ncol = ncy)  # create matrix with number of rows and columns as the number of columns in the dataframe
+    for (i in seq_len(ncx)) {               
+        for (j in seq_len(i)) {             
+            x2 <- x[, i]
+            y2 <- x[, j]
+            r[i, j] <- mean(Fst(x2, y2), na.rm = T)
+        }
+    }
+    r <- r + t(r) - diag(diag(r))
+    rownames(r) <- colnames(x)
+    colnames(r) <- colnames(x)
+    r
+}
+```
+
+```{r}
+# combine alle freq from baseline & timepoint data
+afmat.base.evolving = cbind(afmat.Ace.base, afmat.Ace.evolving) 
+
+
+#calculate Fst between baseline samples and evolving samples
+fst.base.evolving =Fst.mat(afmat.base.evolving) 
+
+
+# turn matrix into dataframe to be able to work with dataframe, 
+# remove first 4 rows of Fst between baseline samples 
+# keep first 4 columns for comparison between each timepoint sample with each of the baseline samples
+fst.base.evolving.df = as.data.frame(fst.base.evolving[-1:-4,1:4]) %>%
+  
+  #add the row names of the data frame as variable    
+  tibble::rownames_to_column("full.sample.name") %>% 
+    
+  # turn the df into long format
+  tidyr::pivot_longer(!full.sample.name, names_to = "compared_to", values_to = "fst_vs_baseline") %>%
+  
+  # add sample information
+  left_join(samps.Ace.evolving, by = "full.sample.name") %>% 
+        
+  mutate(tpt = factor(tpt, levels = c("1", "3","10","12"))) %>%
+  
+  dplyr::group_by(tpt,treatment,cage) 
+```
+
+## 5.4 Summary statistics
+
+```{r}
+fst.summary = fst.base.evolving.df %>%
+  
+  # group to get the mean Fst from 4 comparisons per evolving population to each of the 4 baseline populations
+  group_by(tpt,treatment,cage) %>%
+  
+  summarise(
+    # Calculate mean
+    mean_fst = mean(fst_vs_baseline), 
+    # Count of replicates
+    replicates = n(),  
+    # Calculate standard deviation
+    sd_fst = sd(fst_vs_baseline),  
+    # Calculate standard error
+    se_fst = sd_fst / sqrt(replicates)  
+  )
+
+fst.summary
+```
+
+## 5.5 Plot pairwise Fst
+
+```{r}
+# defining the maximum and minimum values for the left axis
+max_left_y = 0.05
+min_left_y = 0
+
+tp_labels =  c("Jul 13","Jul 26", "Sep 21","Dec 22")
+treatment_labels = c("Untreated","Treated")
+treatment_values = c("#347C98", "orange")
+
+Fst_Ace_plot = ggplot(fst.summary, 
+                      aes(x=tpt, y=mean_fst, color=treatment)) + 
+    
+  # Note that we used outlier.shape=NA inside geom_boxpot() to avoid showing outlier data point two times
+  geom_boxplot(outlier.shape= NA)+ 
+  
+  geom_point(position=position_jitterdodge(), alpha = 0.4, size=1.2)+
+    
+  scale_color_manual(name = "Malathion",
+                      labels = treatment_labels,
+                      values = treatment_values) +
+  
+
+  scale_y_continuous( name = "Fst_vs_baseline",
+                      breaks=seq(min_left_y, max_left_y, 0.01), 
+                      limits = c(0, 0.05))+
+  
+  scale_x_discrete(labels = tp_labels) +
+  
+  xlab("") + # removes the x axis title
+  
+  theme_classic() +
+    theme(axis.text.x = element_text(size = 9), 
+          axis.text.y = element_text(size = 9),
+          axis.title = element_text(size = 10),
+          legend.title = element_text(size=10),
+          legend.text = element_text(size=9))
+
+Fst_Ace_plot
+
+```
+
+# 6 Hands-on exercise
+
+The populations contain standing genetic variation for resistance to the organochloride insecticide dieldrin (first described here <https://pubmed.ncbi.nlm.nih.gov/8095336/>). The coordinates for the Rdl extended gene region are (Chr3L:9138938 -9175249).
+
+Did the malathion treatment affect genomic divergence in the Rld region?
+
+# 7 Data for Rld region
+
+We will fist subset the data for the biallelic SNPs in the extended Rld region (Chr3L:9138938 -9175249) both in the baseline and the evolving populations.
+
+## 7.1 Subset baseline data for Rld region
+```{r}
+# we first bind sites and afmat to filter sites of interest in the Ace region from the data
+Rdl.base = cbind(sites.base,afmat.base) %>%
+    
+    #filter Rld region (3L:9,048,673..9,085,239)
+    filter(chrom == "3L" & pos %in% c(9138938:9175249)) 
+
+# we select first two columns of the df for the sites
+sites.Rdl.base = Rdl.base[,1:2]
+
+# we select the rest of the columns of the columns for allele frequencies
+afmat.Rdl.base =Rdl.base[,3:length(Rdl.base)]
+
+# we don't have to subset the samples
+samps.Rdl.base = samps.base
+```
+
+## 5.2 Subset evolving data for Rdl region
+
+```{r}
+# we first bind sites and afmat to filter sites of interest in the Rdl region from the data
+Rdl.evolving = cbind(sites,afmat) %>%
+    
+   #filter Rld region (3L:9,048,673..9,085,239)
+  filter(chrom == "3L" & pos %in% c(9138938:9175249)) 
+
+# we select first two columns of the df for the sites
+sites.Rdl.evolving = Rdl.evolving[,1:2]
+
+# we select the rest of the columns of the columns for allele frequencies
+afmat.Rdl.evolving =Rdl.evolving[,3:length(Rdl.evolving)]
+
+# we don't have to subset the samples
+samps.Rdl.evolving = samps
+```
+
+## 5.3 Fst between baseline & evolving populations
+
+Functions to calculate Fst in a data matrix were written by Sharon Greenblum.
+
+```{r}
+Fst=function(p1, p2) {
+  fhat <- p1/2 + p2/2  # avg freq across both pops ie (p1+p2)/2
+  Htot <- 2*fhat*(1-fhat) #heterozygosity of the avg freq ie 2pq 
+  Hwith <- p1*(1-p1) + p2*(1-p2) #avg heterozygosity of indivdual pop freqs  ie. (2pq + 2pq)/2
+  fst=(Htot-Hwith)/Htot # how different are they? scaled by total
+  fst[fhat==0 | fhat==1]=0 # set fst for fixed sites to zero
+  return(fst)
+}
+
+
+Fst.mat = function (x) 
+{
+    if (is.data.frame(x)) 
+        x <- as.matrix(x)                   #if x is data.frame, it turns it into matrix
+    if (!(is.numeric(x) || is.logical(x)))  #if dataframe is not numeric or is logical - the script stops
+        stop("'x' must be numeric")
+    ncy <- ncx <- ncol(x)                   # create variables with the same length as the number of columns of the dataframe
+    r <- matrix(0, nrow = ncx, ncol = ncy)  # create matrix with number of rows and columns as the number of columns in the dataframe
+    for (i in seq_len(ncx)) {               
+        for (j in seq_len(i)) {             
+            x2 <- x[, i]
+            y2 <- x[, j]
+            r[i, j] <- mean(Fst(x2, y2), na.rm = T)
+        }
+    }
+    r <- r + t(r) - diag(diag(r))
+    rownames(r) <- colnames(x)
+    colnames(r) <- colnames(x)
+    r
+}
+```
+
+```{r}
+# combine alle freq from baseline & timepoint data
+afmat.base.evolving.Rdl = cbind(afmat.Rdl.base, afmat.Rdl.evolving) 
+
+
+#calculate Fst between baseline samples and evolving samples
+fst.base.evolving.Rdl =Fst.mat(afmat.base.evolving.Rdl) 
+
+
+# turn matrix into dataframe to be able to work with dataframe, 
+# remove first 4 rows of Fst between baseline samples 
+# keep first 4 columns for comparison between each timepoint sample with each of the baseline samples
+fst.base.evolving.Rdl.df = as.data.frame(fst.base.evolving.Rdl[-1:-4,1:4]) %>%
+  
+  #add the row names of the data frame as variable    
+  tibble::rownames_to_column("full.sample.name") %>% 
+    
+  # turn the df into long format
+  tidyr::pivot_longer(!full.sample.name, names_to = "compared_to", values_to = "fst_vs_baseline") %>%
+  
+  # add sample information
+  left_join(samps.Rdl.evolving, by = "full.sample.name") %>% 
+        
+  mutate(tpt = factor(tpt, levels = c("1", "3","10","12"))) %>%
+  
+  dplyr::group_by(tpt,treatment,cage) 
+```
+
+## 5.4 Summary statistics
+
+```{r}
+fst.summary.Rdl = fst.base.evolving.Rdl.df %>%
+  
+  # group to get the mean Fst from 4 comparisons per evolving population to each of the 4 baseline populations
+  group_by(tpt,treatment,cage) %>%
+  
+  summarise(
+    # Calculate mean
+    mean_fst = mean(fst_vs_baseline), 
+    # Count of replicates
+    replicates = n(),  
+    # Calculate standard deviation
+    sd_fst = sd(fst_vs_baseline),  
+    # Calculate standard error
+    se_fst = sd_fst / sqrt(replicates)  
+  )
+
+fst.summary.Rdl
+```
+
+## 5.5 Plot pairwise Fst
+
+```{r}
+# defining the maximum and minimum values for the left axis
+max_left_y = 0.05
+min_left_y = 0
+
+tp_labels =  c("Jul 13","Jul 26", "Sep 21","Dec 22")
+treatment_labels = c("Untreated","Treated")
+treatment_values = c("#347C98", "orange")
+
+Fst_Rdl_plot = ggplot(fst.summary.Rdl, 
+                      aes(x=tpt, y=mean_fst, color=treatment)) + 
+    
+  # Note that we used outlier.shape=NA inside geom_boxpot() to avoid showing outlier data point two times
+  geom_boxplot(outlier.shape= NA)+ 
+  
+  geom_point(position=position_jitterdodge(), alpha = 0.4, size=1.2)+
+    
+  scale_color_manual(name = "Malathion",
+                      labels = treatment_labels,
+                      values = treatment_values) +
+  
+  scale_x_discrete(labels = tp_labels) +
+  
+  scale_y_continuous( name = "Fst_vs_baseline",
+                      breaks=seq(min_left_y, max_left_y, 0.01), 
+                      limits = c(0, 0.05))+
+  
+  scale_x_discrete(labels = tp_labels) +
+  
+  xlab("") + # removes the x axis title
+  
+  theme_classic() +
+    theme(axis.text.x = element_text(size = 9), 
+          axis.text.y = element_text(size = 9),
+          axis.title = element_text(size = 10),
+          legend.title = element_text(size=10),
+          legend.text = element_text(size=9))
+
+Fst_Rdl_plot
+
+```
+

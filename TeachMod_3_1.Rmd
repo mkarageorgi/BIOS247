@@ -1,0 +1,247 @@
+---
+title: "BIO247 - Day 3: Quasibinomial logistic regression to model allele frequency data"
+author: "Marianthi Karageorgi"
+date: "08-05-2024 "
+output: pdf_document
+---
+
+# 1. Learning goals
+
+In this session, you will learn to model allele frequency time series data from an experimental evolution study to identify consistent allele frequency differences over time and between treatments.
+
+# 2. Background
+
+The data you will be analyzing are from an experimental evolution experiment with fruit flies in field mesocosms (Karageorgi et al., unpublished). Normally you would have to first perform the bioinformatic analysis to get the allele frequency data. To save time, you will be working with the allele frequency data directly.
+
+**Experiment summary**
+
+20 replicate Drosophila populations were established all originating from a common baseline population. These populations were allowed to evolve from early summer to late fall in 2021 (\~10-12 generations). From mid-summer to early fall (July 26 - Sept 6, 2021), 10 of these populations were treated with the insecticide malathion. Using whole-genome pooled sequencing, we quantified allele frequencies at all biallelic SNPs throughout the course of the experiment both for the malathion-treated and malathion-untreated populations.
+
+# 3. Motivating Questions
+
+The target locus of malathion is Acetylcholinesterase (Ace gene) and the populations have standing genetic variation for four resistance mutations in the Ace gene.
+
+1.  Did the malathion treatment impact the Ace allele frequency trajectories in the treated populations?
+
+2.  The populations also contain standing genetic variation for the insecticide dieldrin. Did the frequency of the resistant allele decrease in the absence of selection?
+
+    (hands-on activity #1)
+
+# 4. Data
+
+The data can be downloaded here. The RData file contains three data frames
+
+-   **afmat**: a numeric matrix of allele frequencies (columns correspond to samples, rows to snps) (Allele Freq MATrix)
+-   **samps**: a dataframe with sample information, ordered by column of afmat, such that each row of samps provides sample information for the corresponding column of afmat.
+-   **sites**: a two-column data frame of chromosome and positions corresponding to the rows of afmat.
+
+```{r}
+library(tidyverse) # R packages for data manipulation, visualization, and analysis
+library(future)     # for parallel computation
+library(purrr)      # functional programming tools for working with data
+library(furrr)      # functional parallel programming
+library(broom)      # tidy and summarize model output
+library(parallel)   # embarrasingly parallel processing
+```
+
+```{r}
+# get data from same folder where you have saved the .Rmd file
+load("./Bio247_EvolvingData.RData", verbose = TRUE) 
+
+# view first 10 row of each data frame
+head(samps)
+head(sites)
+head(afmat)
+```
+
+# 5. Data for Ace
+
+The coordinates for the Ace resistance mutations are chr3R: 9069721 (I161V), chr3R:9069408 (G265A), chr3R: 9069054 (F330Y), chr3R:9063921 (G368A)
+
+We will subset the data to keep only the positions of interest
+
+```{r}
+# subset afmat for positions of interest
+Ace_afmat = cbind(sites, afmat) %>%
+  
+  # filter Ace resistance mutations
+   filter(chrom == "3R" & pos %in% c(9069721, 9069408, 9069054, 9063921))
+  
+  ## you can also filter the Ace region
+  # filter(chrom == "3R" & pos %in% 9050427:9084460)
+
+# Transpose the dataframe and set the "pos" values as column names
+Ace_afmat = Ace_afmat[, -1]  # remove the "chrom" column
+t_Ace_afmat = t(Ace_afmat)   # transpose the Ace.afmat
+colnames(t_Ace_afmat) <- Ace_afmat$pos #set the "pos" values as column names
+t_Ace_afmat = t_Ace_afmat[-1,] #remove row pos
+t_Ace_afmat = as.data.frame(t_Ace_afmat, stringsAsFactors = FALSE) #convert to dataframe
+
+
+
+# Format dataframe which allows selecting a specific treatment & tpt 
+Ace_data = cbind(samps, t_Ace_afmat) %>%
+  
+  #remove columns biol.rep & tech.rep
+  select(-biol.rep, -tech.rep) %>%
+  
+  # turn the tpt column into numeric and re-name tpt to have continuous numbers
+   mutate(tpt = case_when( 
+    tpt == "1" ~ 1, 
+    tpt == "3" ~ 2, 
+    tpt == "10" ~ 3, 
+    tpt == "12" ~ 4,  TRUE ~ as.numeric(tpt))) %>%
+  
+  #turn character to numeric
+  dplyr::mutate(across(7:last_col(), as.numeric)) %>%
+  
+  # add a column for generation time - necessary for rd.site (coverage related)
+  mutate(generation = case_when( 
+    tpt == 1 ~ 6, tpt == 2 ~ 7, tpt == 3 ~ 13, tpt == 4 ~ 15), .after = tpt)
+
+rownames(Ace_data) = NULL
+```
+
+# 6. Model Ace Allele Frequency data with time as a predictor variable
+
+In this model, 'p' signifies the expected frequency of the allele 'A', with 'time' serving as a continuous predictor variable.
+
+`logit(p) = log(p/(1-p)) = b0 * 1 +b1* time`
+
+-   The intercept b0 corresponds to the log odds of being "A" when time is at zero
+
+-   The estimated coefficient b1 for time corresponds to the difference in the log odds
+
+The script implements a generalized linear model (GLM) to analyze the frequency of the Ace allele, with data grouped by treatment and specific timepoint ranges.
+
+```{r}
+source("./quasi_GLM_mdl1.R")
+
+# Create a vector of treatments and a vector of time point ranges
+treatments = unique(Ace_data$treatment)
+timepoint_ranges <- list(c(1,2), c(2,3), c(3,4)) #tps relevant to malathion treatment
+#timepoint_ranges = list(c(1,4)) #across experiment
+
+# Create an empty list to store the results
+results_list = list()
+
+# Create a dataframe with chromosome-specific arguments for rd.site (related to coverage)
+chrom.args = data.frame(
+  chromosome = c("2L", "2R", "3L", "3R", "X"),
+  pct_missing = c(6.81, 6.15, 6.85, 7.06, 7.96),
+  nof_snps = c(620700, 482594, 576993, 596326, 335095),
+  chrom_length = c(23011544, 21146708, 24543557, 27905053, 22422827),
+  recomb_rate = c(0.0000000239, 0.0000000266, 0.0000000179, 0.0000000196, 0.0000000295),
+  stringsAsFactors = FALSE
+)
+
+# Loop over the treatments
+results_list = lapply(treatments, function(treatment) {
+  # Loop over the time point ranges
+  res = lapply(timepoint_ranges, function(tp_range) {
+    # Subset the data based on the time point range and treatment
+    subset_data = Ace_data %>% filter(treatment == !!treatment & tpt >= tp_range[1] & tpt <= tp_range[2])
+    
+    # Fit the GLM model with chromosome-specific arguments
+    result = fit_GLM(
+      af.site = subset_data %>% dplyr::select(9:ncol(.)),
+      rd.site = calc_expected_ec(
+        rd = 8,
+        gen = subset_data$generation,
+        pct_missing = 7.06, 
+        nof_snps = 596326,         
+        chrom_length = 27905053, 
+        recomb_rate = 0.0000000196    
+      ),
+      sampData = subset_data %>% dplyr::select(sample, tpt, treatment),
+      formulaString = "cts ~ tpt",
+      poolSize = 100,
+      numCores = 6
+    )
+
+    # Add the result to the list
+    treat_range = paste(treatment, paste(tp_range, collapse = "_"), sep = ".")
+    result$treat_range = treat_range
+    results_list[[treat_range]] = result
+  })
+  
+  res
+})
+
+# Combine summary model data in one dataframe 
+result_df1 = bind_rows(results_list, .id = "treatment") %>% filter(term == "tpt") 
+
+# Reset row names
+rownames(result_df1) = NULL
+```
+
+# 7. Hands-on exercise
+
+The populations also contain standing genetic variation for the insecticide dieldrin. Did the frequency of the resistant allele decrease in the absence of selection?
+
+# **8. Appendix A: Binomial regression**
+
+The **binomial probability** calculates the chance of observing a specific number of "successes" (in this case, drawing 'A' alleles) in a certain number of trials (drawing from total number of alleles), when the probability of success on each trial is known.
+
+The formula is:
+
+Pr(X = k) = C(n, k) \* (p\^k) \* ((1 - p)\^(n - k))
+
+For example, if we have a population of 200 alleles, where the frequency of 'A' alleles (our definition of "success") is 0.2 (or 20%), and we want to find the probability of drawing exactly 40 'A' alleles (k), we would use this formula:
+
+Pr(X = 40) = C(200, 40) \* (0.2\^40) \* ((1 - 0.2)\^(200 - 40))
+
+```{r}
+# Define a function to compute binomial probability
+binomial_prob <- function(k, n, p) {
+  # Calculate combinations
+  combinations <- choose(n, k)
+  
+  # Calculate binomial probability
+  binom_prob <- combinations * (p^k) * ((1 - p)^(n - k))
+  
+  # Return the binomial probability
+  return(binom_prob)
+}
+
+x = binomial_prob(k=40, n = 200, p =0.2)
+```
+
+The **binomial likelihood** calculates the likelihood of observing a certain fraction of "successes" (in this case, drawing 'A' alleles) in a certain number of trials (drawing from total number of alleles), given a specific observed probability of success.
+
+The formula is:
+
+L(p\|x,n) = C(n, k) \* (p\^k) \* ((1 - p)\^(n - k))
+
+For example, if we have a pool of 200 alleles, where 40 'A' alleles (our definition of "success") are observed, and we want to find the likelihood of observing a fraction p = 0.2 (or 20%), we would use this formula:
+
+L(0.2\|40,200) = C(200, 40) \* (0.2\^40) \* ((1 - 0.2)\^(200 - 40))
+
+```{r}
+# Define a function to compute binomial likelihood
+binomial_likelihood <- function(k, n, p) {
+  # Calculate combinations
+  combinations <- choose(n, k)
+  
+  # Calculate binomial likelihood
+  binom_likelihood <- combinations * (p^k) * ((1 - p)^(n - k))
+  
+  # Return the binomial likelihood
+  return(binom_likelihood)
+}
+
+y = binomial_likelihood(k=40, n= 200, p= 0.2)
+y
+```
+
+The **maximum likelihood** estimate for p is the observed fraction of successes, which is k (the number of 'A' alleles) divided by n (the total number of alleles). In this example, the maximum likelihood estimate for p would be 40/200 = 0.2.
+
+# 9. Appendix B: Useful links
+
+1.  [Logistic regression models](https://stats.oarc.ucla.edu/other/mult-pkg/faq/general/faq-how-do-i-interpret-odds-ratios-in-logistic-regression/?fbclid=IwAR0NK57t6YaWZgfx9MUrnXsqJ-58cNfbr13iLp53xqb7PUSJoADg6GEfey8)
+2.  <https://stephens999.github.io/fiveMinuteStats/wright_fisher_model.html>
+3.  <https://sherrytowers.com/2018/03/07/logistic-binomial-regression/>
+4.  <https://www.youtube.com/watch?v=4KKV9yZCoM4&t=502s>
+5.  <https://www.theanalysisfactor.com/r-tutorial-glm1/>
+
+## 

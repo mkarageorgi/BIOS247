@@ -1,0 +1,127 @@
+---
+title: "BIO247 - Day 3_2: Manhattan plot to display P values for individual SNPs across a genomic region"
+author: "Marianthi Karageorgi"
+date: "08-05-2024 "
+output: pdf_document
+---
+
+# 1. Learning goals
+
+In this session, you will learn how to prepare a Manhattan plot to display P values (y axis) for individual SNPs across a genomic region (x axis). This is the second part of the teaching module 3.
+
+# 2. Data
+
+In the first part of the teaching module 3, we fitted glm models to each biallelic SNP in the Ace region for untreated populations (E) and malathion-treated populations (P) over three different time ranges: before (1-2), during (2-3), and after (3-4) malathion treatment. The results of the modelling are stored in the Ace_data_Manhattan.csv file.
+
+```{r}
+library(tidyverse) # R packages for data manipulation, visualization, and analysis
+```
+
+```{r}
+# read csv file for p value in the Ace regions
+Ace_region = read_csv("./Ace_data_Manhattan.csv") 
+```
+
+## 2.1 Data preparation for manhattan plot
+
+```{r}
+  Ace_region.manhattan = Ace_region %>% 
+  
+  # the column called column correspond to genomic position
+  rename(pos = column) %>%
+  
+  # seperate column treat_range to two columns cage and comparison
+  separate_wider_delim(treat_range, delim = ".", names = c("cage", "comparison")) %>%
+
+  #filter tpt term - otherwise FDR correction will also account the p.values from the intercept
+  filter(term =="tpt") %>% 
+  
+  # group by cage and comparison to get all SNPs for each time range for E or P cages
+  group_by(cage,comparison) %>% 
+  
+  #fdr correction for all SNPs per treat_range (p-value is calculated as: p-value * rank/number of tests)
+  mutate(p.value.adjusted = p.adjust(p.value, method="BH"), .after = p.value) %>%
+  
+  # score SNPs based on their significance
+  mutate(sigLevel = case_when(
+    p.value.adjusted > 0.05  ~ 1,  
+    p.value.adjusted < 0.05  ~ 2), .after = p.value.adjusted) %>%
+  
+  # convert sigLevel to a factor
+  mutate(sigLevel = factor(sigLevel, levels = c(1, 2))) 
+```
+
+# 3. Manhattan plot
+
+```{r}
+# STEP 1: Subset Ace_region.manhattan dataframe for treatment and comparison of interest
+
+manhattan.P.2_3 = Ace_region.manhattan %>%
+  filter(cage == "P" & comparison == "2_3") %>%
+  mutate(sigLevel = factor(sigLevel, levels = c(1, 2)))
+
+# STEP 2: Prepare manhattan plot
+
+# Calculate the minimum and maximum positions to set the limits for the x-axis
+min_pos = min(manhattan.P.2_3$pos, na.rm = TRUE)  
+max_pos = max(manhattan.P.2_3$pos, na.rm = TRUE)
+
+
+# Labels for level of significance
+labels_significance = c("BH-FDR < 0.05", "BH-FDR > 0.05")
+values_significance = c("1" = "grey", "2" = "#8601AF")
+
+
+# Create the plot
+manhattan.P.2_3.plot = ggplot() +
+  
+  # Scatterplot where x is genomic position, y is the negative log10 of the adjusted p-value, and color represents significance level
+  geom_point(data = manhattan.P.2_3, 
+             aes(x = pos, y = -log10(p.value.adjusted), color = sigLevel), size = 0.1) +
+  
+  # Manually set the colors for different levels of significance
+  scale_color_manual(labels = labels_significance,
+                     values = values_significance) +
+  
+  # Define labels for the x and y axes
+  labs(x = "Genomic Position (Mb)", 
+       y = "Significance of parallel shift \n -log10(FDR-corrected p value)") +
+  
+  # Draw a horizontal line at the threshold for significance (y = -log10(0.05))
+  geom_hline(yintercept = -log10(0.05), linetype = "dashed", color = "black") +
+  
+  # Set limits for the x-axis based on the min and max positions
+  scale_x_continuous(limits = c(min_pos, max_pos)) +
+  
+  # Set the breaks and limits for the y-axis
+  scale_y_continuous(breaks = seq(0, 20, 5),
+                     limits = c(0, 20)) +
+  
+  # Use a classic theme to provide a clean background
+  theme_classic() +
+  
+  # Additional styling for the plot elements
+  theme(
+    axis.text.x = element_text(size = 9, angle = 90, vjust = 0.5),
+    axis.text.y = element_text(size = 9),
+    axis.title = element_text(size = 10),
+    legend.title = element_blank(),
+    legend.text = element_text(size = 9),
+    legend.position = "top",
+    plot.title = element_text(size = 11))
+
+manhattan.P.2_3.plot
+
+# Save the plot in the same directory 
+ggsave("./manhattan.P.2_3.png",manhattan.P.2_3.plot,width = 12, height = 4)
+```
+
+# 4. Hands-on exercise
+
+-   Prepare Manhattan plot for treated cages (P cages) after the malathion treatment
+
+-   Prepare Manhattan plot for untreated cages (E cages) during the malathion treatment
+
+-   Prepare Manhattan plot for untreated cages (E cages) during the malathion treatment
+
+-   Prepare Manhattan plot for treated (P) and untreated cages (E cages) during the malathion treatment in the extended Rdl region. The coordinates for the Rdl extended gene region are (Chr3L:9138938 -9175249).
